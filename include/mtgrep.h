@@ -35,3 +35,5 @@ void find_patterns_seq (search_t args);
 void * open_file_thread (void * search_data);
 
 void find_patterns_parallel (search_t args, const int number_of_threads);
+
+int find_pattern_in_file_Boyer_Moore (char * pattern, char * abs_path);
