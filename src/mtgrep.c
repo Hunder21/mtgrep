@@ -105,40 +105,86 @@ char ** get_dir_content (char * dir) {
     return dir_content;
 }
 
+int find_symb (char symb, int pos, char symb_arr []) {
+    for(int i = pos - 1; i >= 0; --i) {
+        if (symb_arr[i] == symb)
+        return i;
+    }
+    return -1;
+}
+
+// Speeded up Boyer Moore bad symbol pattern search algorithm.
+
+int find_pattern_in_file_Boyer_Moore (char * pattern, char * abs_path) {
+    const int pattern_len = strlen(pattern);
+    
+    ////////////////
+    FILE * fd = fopen(abs_path, "r");
+    char sliding_window [pattern_len+1];
+    // read sliding window initial state
+    fgets(sliding_window, pattern_len+1, fd);
+    sliding_window[pattern_len] = '\0';
+
+    int j = pattern_len - 1;
+    while(1) {
+        if(pattern[j] == sliding_window[j]) {
+            if(j == 0) return 1;
+            j--;
+            continue;
+        } else {
+            j = pattern_len - 1;
+            int pos_to_left;
+            if((pos_to_left = find_symb(sliding_window[j], j, pattern)) == -1) {
+                // shift by pattern len
+                if (fgets(sliding_window, pattern_len+1, fd) == NULL)
+                    return 0;
+            } else {
+                // shift by pos_to_left
+                for(int i = 0; i < pattern_len - pos_to_left - 1; ++i) {
+                    for(int k = 0; k < pattern_len-1; ++k) {
+                        sliding_window[k] = sliding_window[k+1];
+                    }
+                    char next_ch;
+                    if ((next_ch = fgetc(fd)) != EOF) {
+                        sliding_window[pattern_len-1] = next_ch;
+                    } else {
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Simple find pattern algorithm
+
 int find_pattern_in_file (char * pattern, char * abs_path) {
     FILE *fd = fopen(abs_path, "r");
     
     if (fd == NULL) {
         printf("Couldn't open file %s!\n", abs_path);
         return 0;
-    } else {
-        // printf("Searching in \"%s\"...\n", abs_path);
     }
 
     const size_t pattern_size = strlen(pattern);
     char sliding_window [pattern_size+1];
     sliding_window[pattern_size] = '\0';
-    size_t w_size = 0;
+
+    fgets(sliding_window, pattern_size, fd);
+    sliding_window[pattern_size] = '\0';
     
     while(1) {
         char next_ch = fgetc(fd);
-        if(w_size < pattern_size) {
-            if(next_ch != EOF) {
-                sliding_window[w_size] = next_ch;
-                w_size++;
-            } else break;
-        } else {
-            if (strcmp(pattern, sliding_window) == 0) {
-                fclose(fd);
-                return 1;
-            }
-            if(next_ch != EOF) {
-                for(size_t i = 0; i < pattern_size-1; ++i) {
-                    sliding_window[i] = sliding_window[i+1];
-                }
-                sliding_window[pattern_size-1] = next_ch;
-            } else break;
+        if (strcmp(pattern, sliding_window) == 0) {
+            fclose(fd);
+            return 1;
         }
+        if(next_ch != EOF) {
+            for(size_t i = 0; i < pattern_size-1; ++i) {
+                sliding_window[i] = sliding_window[i+1];
+            }
+            sliding_window[pattern_size-1] = next_ch;
+        } else break;
     }
     fclose(fd);
     return 0;
@@ -148,7 +194,7 @@ void find_patterns_seq (search_t args) {
     size_t meets = 0;
     printf("Pattern: \"%s\"\n", args.pattern);
     for(int i = 0; i < args.number_of_names; ++i) {
-        if(find_pattern_in_file(args.pattern, args.names[i]) == 1)
+        if(find_pattern_in_file_Boyer_Moore(args.pattern, args.names[i]) == 1)
         {   
             meets++;
             printf("Met pattern in \"%s\"!\n", args.names[i]);
@@ -161,7 +207,7 @@ void * open_file_thread (void * search_data) {
     int * ret_val = malloc(sizeof(int));
     for(int i = 0; i < ((search_t *)search_data)->number_of_names; ++i) {
         int status;
-        if((status = find_pattern_in_file(((search_t *)search_data)->pattern, ((search_t *)search_data)->names[i])) == 1) {
+        if((status = find_pattern_in_file_Boyer_Moore(((search_t *)search_data)->pattern, ((search_t *)search_data)->names[i])) == 1) {
             printf("Met pattern in \"%s\"!\n", ((search_t *)search_data)->names[i]);
         }
         *(ret_val) += status;
@@ -195,7 +241,6 @@ void find_patterns_parallel (search_t args, const int number_of_threads) {
     for(int i = 0; i < number_of_threads; ++i) {
         pthread_join(thread[i], &ret_val[i]);
     }
-
     for(int i = 0; i < number_of_threads; ++i) {
         meets += *(int *)ret_val[i];
     }
