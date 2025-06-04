@@ -14,7 +14,7 @@ search_t extract_filenames (search_t args) {
         struct stat name_stat;
 
         if (stat(name, &name_stat) == -1) {
-            perror("Couldn't get stat!");
+            fprintf(stderr, "Couldn't get stat: %s!\n", name);
             exit(1);
         }
 
@@ -35,7 +35,7 @@ search_t extract_filenames (search_t args) {
                 snprintf(full_path, MAX_ARG_WIDTH, "%s%s", name, entry);
                 
                 if(stat(full_path, &entry_stat) == -1) {
-                    perror("Couldn't get stat!");
+                    fprintf(stderr, "Couldn't get stat: %s!\n", full_path);
                     exit(1);
                 }
 
@@ -43,8 +43,10 @@ search_t extract_filenames (search_t args) {
                     snprintf(args_rev.names[(size_t)args_rev.number_of_names], MAX_ARG_WIDTH, "%s", full_path);
                     args_rev.number_of_names++;
                 }
+
                 i++;
             }   
+
             free(dir_content);
         }
     }
@@ -53,7 +55,7 @@ search_t extract_filenames (search_t args) {
 
 search_t parse_input_args(int argc, char *argv[]) {
     search_t args = {0};
-    strcpy(args.pattern, argv[1]);
+    snprintf(args.pattern, MAX_ARG_WIDTH, "%s", argv[1]);
     for(int i = 2; i < argc; ++i) {
         snprintf(args.names[(size_t)args.number_of_names], MAX_ARG_WIDTH, "%s", argv[i]);
         args.number_of_names ++;
@@ -72,30 +74,61 @@ void print_args(search_t args) {
 
 char ** get_dir_content (char * dir) {
     // Directory content
-    char ** dir_content = malloc(sizeof(char *));
+    char ** dir_content = malloc(10*sizeof(char *));
+    size_t dir_content_size = 10;
+    if(dir_content == NULL) {
+        fprintf(stderr, "Couldn't allocate memory for directory content!");
+        exit(1);
+    }
     // Count directory content
     size_t count_content = 0;
     // Open directory
     DIR * dr = opendir(dir);
+    if(dr == NULL) {
+        fprintf(stderr, "Couldn't open directory: %s!", dir);
+        exit(1);
+    }
     // Directory member status
     struct dirent * member;
     struct stat fs;
-
     while((member = readdir(dr)) != NULL) {
         // Ignore . and ..
         if (strcmp(member->d_name, ".") == 0 || strcmp(member->d_name, "..") == 0)
             continue;
+
         // Get full path
         char full_path [MAX_ARG_WIDTH];
         snprintf(full_path, MAX_ARG_WIDTH, "%s", dir);
-        strcat(full_path, member->d_name);
+        
+        if(strlen(full_path) + strlen(member->d_name) + 1 > MAX_ARG_WIDTH) {
+            fprintf(stderr, "Path size overflowed!");
+            exit(1);
+        } else {
+            strcat(full_path, member->d_name);
+        }
+        
         // Full path file status
-        stat(full_path, &fs);
+        if (stat(full_path, &fs) == -1) {
+            fprintf(stderr,"Couldn't get stat: %s!\n", full_path);
+            exit(1);
+        }
         
         // Add only regular dir content (No recursive dir search now)
         if(S_ISREG(fs.st_mode)) {
-            dir_content = realloc(dir_content, sizeof(char*)*(count_content+2));
-            *(dir_content + count_content) = malloc(strlen(member->d_name)+1);
+            if(count_content == dir_content_size) {
+                // Add 10 more slots to dir_content
+                dir_content_size += 10;
+                if((dir_content = realloc(dir_content, sizeof(char*)*(dir_content_size))) == NULL) {
+                    fprintf(stderr, "Couldn't allocate memory for new pointer!\n");
+                    exit(1);
+                }
+            }
+
+            if ((*(dir_content + count_content) = malloc(strlen(member->d_name)+1)) == NULL) {
+                fprintf(stderr, "Couldn't allocate memory for new regular file!\n");
+                exit(1);
+            }
+            
             snprintf(*(dir_content + count_content), MAX_ARG_WIDTH, "%s", member->d_name);
             count_content++;
         }
@@ -120,15 +153,32 @@ int find_pattern_in_file_Boyer_Moore (char * pattern, char * abs_path) {
     
     ////////////////
     FILE * fd = fopen(abs_path, "r");
+
+    // use IO file bufferization
+    // to reduce number of sys calls.
+    char io_buf[8192];
+    setvbuf(fd, io_buf, _IOFBF, sizeof(io_buf));
+    
     char sliding_window [pattern_len+1];
+
+    if(fd == NULL) {
+        fprintf(stderr, "Warning: Couldn't open file: %s!\n", abs_path);
+        return 0;
+    }
+
     // read sliding window initial state
-    fgets(sliding_window, pattern_len+1, fd);
+    if(fgets(sliding_window, pattern_len+1, fd) == NULL) {
+        return 0;
+    }
     sliding_window[pattern_len] = '\0';
 
     int j = pattern_len - 1;
     while(1) {
         if(pattern[j] == sliding_window[j]) {
-            if(j == 0) return 1;
+            if(j == 0) {
+                fclose(fd);
+                return 1;
+            }
             j--;
             continue;
         } else {
@@ -136,8 +186,10 @@ int find_pattern_in_file_Boyer_Moore (char * pattern, char * abs_path) {
             int pos_to_left;
             if((pos_to_left = find_symb(sliding_window[j], j, pattern)) == -1) {
                 // shift by pattern len
-                if (fgets(sliding_window, pattern_len+1, fd) == NULL)
+                if(fgets(sliding_window, pattern_len+1, fd) == NULL) {
+                    fclose(fd);
                     return 0;
+                }
             } else {
                 // shift by pos_to_left
                 for(int i = 0; i < pattern_len - pos_to_left - 1; ++i) {
@@ -148,6 +200,7 @@ int find_pattern_in_file_Boyer_Moore (char * pattern, char * abs_path) {
                     if ((next_ch = fgetc(fd)) != EOF) {
                         sliding_window[pattern_len-1] = next_ch;
                     } else {
+                        fclose(fd);
                         return 0;
                     }
                 }
@@ -162,7 +215,7 @@ int find_pattern_in_file (char * pattern, char * abs_path) {
     FILE *fd = fopen(abs_path, "r");
     
     if (fd == NULL) {
-        printf("Couldn't open file %s!\n", abs_path);
+        fprintf(stderr, "Couldn't open file: %s!\n", abs_path);
         return 0;
     }
 
@@ -170,7 +223,9 @@ int find_pattern_in_file (char * pattern, char * abs_path) {
     char sliding_window [pattern_size+1];
     sliding_window[pattern_size] = '\0';
 
-    fgets(sliding_window, pattern_size, fd);
+    if(fgets(sliding_window, pattern_size, fd) == NULL) {
+        return 0;
+    }
     sliding_window[pattern_size] = '\0';
     
     while(1) {
@@ -204,7 +259,12 @@ void find_patterns_seq (search_t args) {
 }
 
 void * open_file_thread (void * search_data) {
-    int * ret_val = malloc(sizeof(int));
+    int * ret_val = calloc(1, sizeof(int));
+    if(ret_val == NULL) {
+        *(int*)ret_val = -1;
+        return ret_val;
+    }
+
     for(int i = 0; i < ((search_t *)search_data)->number_of_names; ++i) {
         int status;
         if((status = find_pattern_in_file_Boyer_Moore(((search_t *)search_data)->pattern, ((search_t *)search_data)->names[i])) == 1) {
@@ -219,17 +279,17 @@ void find_patterns_parallel (search_t args, const int number_of_threads) {
     printf("Pattern: \"%s\"\n", args.pattern);
 
     const int number_of_files = args.number_of_names;
-    size_t meets                = 0;
+    size_t meets              = 0;
     
-    pthread_t thread          [number_of_threads];
-    void * ret_val            [number_of_threads];
+    pthread_t thread     [number_of_threads];
+    void * ret_val       [number_of_threads];
     search_t search_data [number_of_threads];
     
     for(int i = 0; i < number_of_threads; ++i) {
         int k = 0;
-        snprintf(search_data[i].pattern, MAX_ARG_WIDTH, "%s", args.pattern);
+        memcpy(search_data[i].pattern, args.pattern, strlen(args.pattern)+1);
         for(int j = i; j < number_of_files; j+=number_of_threads, k++) {
-            snprintf(search_data[i].names[k], MAX_ARG_WIDTH, "%s", args.names[j]);
+            memcpy(search_data[i].names[k], args.names[j], strlen(args.names[j]) + 1);
         }
         search_data[i].number_of_names = k;
     }
@@ -242,9 +302,12 @@ void find_patterns_parallel (search_t args, const int number_of_threads) {
         pthread_join(thread[i], &ret_val[i]);
     }
     for(int i = 0; i < number_of_threads; ++i) {
+        if(*(int*)ret_val[i] == -1) {
+            fprintf(stderr, "Thread error detected!\n");
+            exit(1);
+        }
         meets += *(int *)ret_val[i];
     }
 
     printf("Meets: %lu\n", meets);
 }
-

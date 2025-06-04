@@ -17,8 +17,6 @@ typedef struct {
     char names   [MAX_FILES_NUM][MAX_ARG_WIDTH];
 } search_t;
 
-// 1 for dir, 0 for file (assume, that each dir ends with /)
-int get_format (char * file);
 // parse input args into struct
 search_t parse_input_args (int argc, char *argv[]);
 
