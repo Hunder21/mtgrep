@@ -1,13 +1,14 @@
 SRC_PATH=../src
-PRJ_SRC+=$(wildcard $(SRC_PATH)/*.c)
+PRJ_SRC_WITH_MAIN=$(wildcard $(SRC_PATH)/*.c)
+PRJ_SRC=$(filter-out $(SRC_PATH)/main.c, $(PRJ_SRC_WITH_MAIN))
 
 TEST_SRC=test.c
 TEST_OBJ=$(BUILD)/test.o
 
+BUILD=build
 PRJ_OBJ=$(patsubst $(SRC_PATH)/%.c,$(BUILD)/%.o,$(PRJ_SRC))
 OBJ+=$(PRJ_OBJ)
 OBJ+=$(TEST_OBJ)
-BUILD=build
 
 BIN=test
 
@@ -42,4 +43,4 @@ test: build
 clean:
 	@$(RM) -rf $(BUILD)
 
-.PHONY: build test clean
+.PHONY: test clean
