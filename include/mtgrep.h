@@ -1,9 +1,5 @@
-#include "pthread.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include "string.h"
-#include "dirent.h"
-#include "sys/stat.h"
+#include "includes.h"
+#include "path_box.h"
 
 #define MAX_ARG_WIDTH 256
 #define MAX_FILES_NUM 256
@@ -32,6 +28,6 @@ void find_patterns_seq (search_t args);
 
 void * open_file_thread (void * search_data);
 
-void find_patterns_parallel (search_t args, const int number_of_threads);
+void find_patterns_parallel (path_box args, const int number_of_threads);
 
 int find_pattern_in_file_Boyer_Moore (char * pattern, char * abs_path);

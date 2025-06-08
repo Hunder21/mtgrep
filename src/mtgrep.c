@@ -72,72 +72,6 @@ void print_args(search_t args) {
     printf("\n");
 }
 
-char ** get_dir_content (char * dir) {
-    // Directory content
-    char ** dir_content = malloc(10*sizeof(char *));
-    size_t dir_content_size = 10;
-    if(dir_content == NULL) {
-        fprintf(stderr, "Couldn't allocate memory for directory content!");
-        exit(1);
-    }
-    // Count directory content
-    size_t count_content = 0;
-    // Open directory
-    DIR * dr = opendir(dir);
-    if(dr == NULL) {
-        fprintf(stderr, "Couldn't open directory: %s!", dir);
-        exit(1);
-    }
-    // Directory member status
-    struct dirent * member;
-    struct stat fs;
-    while((member = readdir(dr)) != NULL) {
-        // Ignore . and ..
-        if (strcmp(member->d_name, ".") == 0 || strcmp(member->d_name, "..") == 0)
-            continue;
-
-        // Get full path
-        char full_path [MAX_ARG_WIDTH];
-        snprintf(full_path, MAX_ARG_WIDTH, "%s", dir);
-        
-        if(strlen(full_path) + strlen(member->d_name) + 1 > MAX_ARG_WIDTH) {
-            fprintf(stderr, "Path size overflowed!");
-            exit(1);
-        } else {
-            strcat(full_path, member->d_name);
-        }
-        
-        // Full path file status
-        if (stat(full_path, &fs) == -1) {
-            fprintf(stderr,"Couldn't get stat: %s!\n", full_path);
-            exit(1);
-        }
-        
-        // Add only regular dir content (No recursive dir search now)
-        if(S_ISREG(fs.st_mode)) {
-            if(count_content == dir_content_size) {
-                // Add 10 more slots to dir_content
-                dir_content_size += 10;
-                if((dir_content = realloc(dir_content, sizeof(char*)*(dir_content_size))) == NULL) {
-                    fprintf(stderr, "Couldn't allocate memory for new pointer!\n");
-                    exit(1);
-                }
-            }
-
-            if ((*(dir_content + count_content) = malloc(strlen(member->d_name)+1)) == NULL) {
-                fprintf(stderr, "Couldn't allocate memory for new regular file!\n");
-                exit(1);
-            }
-            
-            snprintf(*(dir_content + count_content), MAX_ARG_WIDTH, "%s", member->d_name);
-            count_content++;
-        }
-    }
-    *(dir_content + count_content) = NULL;
-    closedir(dr);
-    return dir_content;
-}
-
 int find_symb (char symb, int pos, char symb_arr []) {
     for(int i = pos - 1; i >= 0; --i) {
         if (symb_arr[i] == symb)
@@ -258,44 +192,61 @@ void find_patterns_seq (search_t args) {
     printf("Meets: %lu\n", meets);
 }
 
-void * open_file_thread (void * search_data) {
+void * open_file_thread (void * sdata) {
+
+    char ** data = (char **)sdata;
+
     int * ret_val = calloc(1, sizeof(int));
     if(ret_val == NULL) {
         *(int*)ret_val = -1;
         return ret_val;
     }
 
-    for(int i = 0; i < ((search_t *)search_data)->number_of_names; ++i) {
+    int i = 1;
+    char * search_path;
+    
+    while( (search_path = data[i]) != NULL ) {
+
         int status;
-        if((status = find_pattern_in_file_Boyer_Moore(((search_t *)search_data)->pattern, ((search_t *)search_data)->names[i])) == 1) {
-            printf("Met pattern in \"%s\"!\n", ((search_t *)search_data)->names[i]);
+    
+        char * pattern = data[0];
+
+        if(( status = find_pattern_in_file_Boyer_Moore(pattern, search_path) ) == 1) {
+            printf("Met pattern in \"%s\"!\n", search_path);
         }
+
         *(ret_val) += status;
-        }
+        i ++;
+    }
+    
     return (void *)ret_val;
 }
 
-void find_patterns_parallel (search_t args, const int number_of_threads) {
-    printf("Pattern: \"%s\"\n", args.pattern);
+void find_patterns_parallel (path_box pb, const int number_of_threads) {
+    printf("Pattern: \"%s\"\n", pb.pattern);
 
-    const int number_of_files = args.number_of_names;
-    size_t meets              = 0;
+    const int number_of_files  = pb.number_of_names;
+    const int thread_data_size = number_of_files / number_of_threads + 3;
+    size_t meets               = 0;
     
     pthread_t thread     [number_of_threads];
     void * ret_val       [number_of_threads];
-    search_t search_data [number_of_threads];
+    char * thread_data   [number_of_threads][thread_data_size];
     
     for(int i = 0; i < number_of_threads; ++i) {
-        int k = 0;
-        memcpy(search_data[i].pattern, args.pattern, strlen(args.pattern)+1);
+                
+        thread_data[i][0] = pb.pattern;
+        
+        int k = 1;
+        
         for(int j = i; j < number_of_files; j+=number_of_threads, k++) {
-            memcpy(search_data[i].names[k], args.names[j], strlen(args.names[j]) + 1);
+            thread_data[i][k] = pb.names[j];
         }
-        search_data[i].number_of_names = k;
+        thread_data[i][k] = NULL;
     }
 
     for(int i = 0; i < number_of_threads; ++i) {
-        pthread_create(&(thread[i]), NULL, open_file_thread, &search_data[i]);
+        pthread_create(&(thread[i]), NULL, open_file_thread, thread_data[i]);
     }
     
     for(int i = 0; i < number_of_threads; ++i) {
